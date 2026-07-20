@@ -131,6 +131,7 @@ To avoid UniFi writeback entirely, disable DHCP conversion inputs:
 | `SYNC_WLANS` | `true` | Sync WLANs |
 | `SYNC_CABLES` | `true` | Sync uplink cables |
 | `SYNC_STALE_CLEANUP` | `true` | Mark missing devices offline |
+| `SYNC_DEVICE_TAG` | empty | Optional tag attached to every synced device (e.g. `zabbix` for monitoring integration). Empty by default — no extra tag is added. |
 
 ## Threading
 
