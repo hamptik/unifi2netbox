@@ -104,6 +104,12 @@ _all_unifi_serials_global = set()
 _site_mapping_cache = {}
 _site_mapping_cache_lock = threading.Lock()
 
+# Controllers that failed during the current sync run.
+# Stale-marking is skipped entirely if any controller failed, to prevent
+# marking live devices offline just because their controller was unreachable.
+_controller_failed_urls: list[str] = []
+_controller_failed_lock = threading.Lock()
+
 _ASSET_TAG_RE = re.compile(r"[-_]?(A?ID\d+)$", re.IGNORECASE)
 _MAC_WITH_SEP_RE = re.compile(r"(?i)([0-9a-f]{2}[:-]){5}[0-9a-f]{2}$")
 _MAC_PLAIN_RE = re.compile(r"(?i)[0-9a-f]{12}$")
@@ -2627,6 +2633,8 @@ def process_controller(unifi_url, unifi_username, unifi_password, unifi_mfa_secr
             for future in as_completed(futures):
                 future.result()
     except Exception as e:
+        with _controller_failed_lock:
+            _controller_failed_urls.append(unifi_url)
         logger.error(f"Error processing controller {unifi_url}: {e}")
 
 def process_all_controllers(unifi_url_list, unifi_username, unifi_password, unifi_mfa_secret, unifi_api_key, unifi_api_key_header, nb, nb_ubiquiti, tenant,
@@ -2661,6 +2669,68 @@ def process_all_controllers(unifi_url_list, unifi_username, unifi_password, unif
             except Exception as e:
                 logger.exception(f"Error processing one of the UniFi controllers {url}: {e}")
                 continue
+
+
+# ---------------------------------------------------------------------------
+#  Stale-marking (runs AFTER all controllers finish)
+# ---------------------------------------------------------------------------
+
+def run_stale_marking(nb, tenant, nb_ubiquiti, netbox_sites_dict):
+    """Mark NetBox devices stale (offline) when they disappear from UniFi.
+
+    Runs AFTER all controllers have been processed so the global serial set
+    is complete. If any controller failed, stale-marking is skipped entirely
+    to prevent false positives — marking live devices offline just because
+    their controller was temporarily unreachable.
+    """
+    if os.getenv("SYNC_STALE_CLEANUP", "true").strip().lower() not in ("true", "1", "yes"):
+        return
+
+    with _controller_failed_lock:
+        failed = list(_controller_failed_urls)
+
+    if failed:
+        logger.warning(
+            f"Skipping stale-marking: {len(failed)} controller(s) failed: {failed}. "
+            f"Devices from failed controllers will NOT be marked stale this cycle."
+        )
+        return
+
+    with _cleanup_serials_lock:
+        unifi_serials = set(_all_unifi_serials_global)
+
+    if not unifi_serials:
+        logger.warning(
+            "Skipping stale-marking: no UniFi serials collected. "
+            "This may indicate all controllers returned 0 devices."
+        )
+        return
+
+    marked = 0
+    for site_name, nb_site in netbox_sites_dict.items():
+        if nb_site.id not in _cleanup_serials_by_site:
+            continue
+        try:
+            nb_devices_at_site = list(nb.dcim.devices.filter(
+                site_id=nb_site.id, tenant_id=tenant.id, manufacturer_id=nb_ubiquiti.id
+            ))
+            for nb_dev in nb_devices_at_site:
+                if nb_dev.serial and nb_dev.serial not in unifi_serials:
+                    current_status = nb_dev.status.value if hasattr(nb_dev.status, 'value') else str(nb_dev.status)
+                    if current_status != "offline":
+                        nb_dev.status = "offline"
+                        nb_dev.save()
+                        logger.info(f"Marked stale device '{nb_dev.name}' as offline (not in UniFi)")
+                        marked += 1
+        except Exception as e:
+            logger.warning(f"Failed to mark stale devices for site {site_name}: {e}")
+
+    if marked:
+        logger.info(
+            f"Stale-marking: {marked} device(s) marked offline "
+            f"across {len(_cleanup_serials_by_site)} site(s)"
+        )
+
 
 # ---------------------------------------------------------------------------
 #  NetBox Cleanup Functions
@@ -3032,6 +3102,8 @@ if __name__ == "__main__":
             _exhausted_static_prefixes.clear()
             with _static_prefix_locks_lock:
                 _static_prefix_locks.clear()
+            with _controller_failed_lock:
+                _controller_failed_urls.clear()
 
         logger.info(f"=== Sync run #{run_count} starting ===")
 
@@ -3039,6 +3111,28 @@ if __name__ == "__main__":
         process_all_controllers(unifi_url_list, unifi_username, unifi_password, unifi_mfa_secret,
                                 unifi_api_key, unifi_api_key_header, nb, nb_ubiquiti,
                                 tenant, netbox_sites_dict, config)
+
+        # Abort the rest of the cycle if any controller failed and the user
+        # hasn't explicitly opted out of this safety check.
+        require_all = os.getenv("SYNC_REQUIRE_ALL_CONTROLLERS", "true").strip().lower() in ("true", "1", "yes")
+        with _controller_failed_lock:
+            failed = list(_controller_failed_urls)
+        if failed and require_all:
+            logger.error(
+                f"Aborting sync run #{run_count}: {len(failed)} controller(s) failed: {failed}. "
+                f"Set SYNC_REQUIRE_ALL_CONTROLLERS=false to allow partial syncs."
+            )
+            logger.info(f"=== Sync run #{run_count} aborted ===")
+            if sync_interval <= 0:
+                break
+            logger.info(f"Sleeping {sync_interval} seconds until next sync...")
+            _time.sleep(sync_interval)
+            continue
+
+        # Mark stale devices AFTER all controllers finish (not per-site inside
+        # process_site) to avoid race conditions between controllers that share
+        # the same NetBox site.
+        run_stale_marking(nb, tenant, nb_ubiquiti, netbox_sites_dict)
 
         # Run cleanup after sync
         run_netbox_cleanup(nb, nb_ubiquiti, tenant, netbox_sites_dict, _cleanup_serials_by_site)
