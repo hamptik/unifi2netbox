@@ -110,6 +110,17 @@ _site_mapping_cache_lock = threading.Lock()
 _controller_failed_urls: list[str] = []
 _controller_failed_lock = threading.Lock()
 
+
+def _device_manufacturer_id(nb_dev):
+    """Extract the manufacturer ID from a pynetbox device record.
+
+    Returns None if device_type or manufacturer is missing.
+    """
+    try:
+        return nb_dev.device_type.manufacturer.id
+    except (AttributeError, TypeError):
+        return None
+
 _ASSET_TAG_RE = re.compile(r"[-_]?(A?ID\d+)$", re.IGNORECASE)
 _MAC_WITH_SEP_RE = re.compile(r"(?i)([0-9a-f]{2}[:-]){5}[0-9a-f]{2}$")
 _MAC_PLAIN_RE = re.compile(r"(?i)[0-9a-f]{12}$")
@@ -2715,6 +2726,8 @@ def run_stale_marking(nb, tenant, nb_ubiquiti, netbox_sites_dict):
                 site_id=nb_site.id, tenant_id=tenant.id, manufacturer_id=nb_ubiquiti.id
             ))
             for nb_dev in nb_devices_at_site:
+                if _device_manufacturer_id(nb_dev) != nb_ubiquiti.id:
+                    continue
                 if nb_dev.serial and nb_dev.serial not in unifi_serials:
                     current_status = nb_dev.status.value if hasattr(nb_dev.status, 'value') else str(nb_dev.status)
                     if current_status != "offline":
@@ -2758,6 +2771,8 @@ def cleanup_stale_devices(nb, nb_site, tenant, unifi_serials, nb_ubiquiti):
     ))
     deleted = 0
     for dev in nb_devices:
+        if _device_manufacturer_id(dev) != nb_ubiquiti.id:
+            continue
         serial = str(dev.serial or "").upper().replace(":", "")
         if not serial:
             continue
@@ -2803,6 +2818,8 @@ def cleanup_orphan_interfaces(nb, nb_site, tenant, nb_ubiquiti):
     ))
     deleted = 0
     for dev in nb_devices:
+        if _device_manufacturer_id(dev) != nb_ubiquiti.id:
+            continue
         ifaces = list(nb.dcim.interfaces.filter(device_id=dev.id))
         for iface in ifaces:
             if "?" in (iface.name or ""):
