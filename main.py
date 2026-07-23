@@ -2562,6 +2562,30 @@ def process_site(unifi, nb, site_obj, site_display_name, nb_site, nb_ubiquiti, t
                 except Exception as e:
                     logger.warning(f"Failed to sync uplink cables for site {site_display_name}: {e}")
 
+            # Mark stale devices (in NetBox but no longer in UniFi) as offline.
+            #
+            # The check uses the GLOBAL serial set across all controllers/sites,
+            # not a per-site one. Rationale: with global serial lookup + site
+            # preservation, a device may live on a NetBox site that differs
+            # from its UniFi mapping target. Marking such a device offline just
+            # because its serial isn't in the current site's UniFi payload would
+            # clobber legitimately relocated devices.
+            if os.getenv("SYNC_STALE_CLEANUP", "true").strip().lower() in ("true", "1", "yes"):
+                try:
+                    with _cleanup_serials_lock:
+                        unifi_serials = set(_all_unifi_serials_global)
+                    nb_devices_at_site = list(nb.dcim.devices.filter(
+                        site_id=nb_site.id, tenant_id=tenant.id, manufacturer_id=nb_ubiquiti.id
+                    ))
+                    for nb_dev in nb_devices_at_site:
+                        if nb_dev.serial and nb_dev.serial not in unifi_serials:
+                            current_status = nb_dev.status.value if hasattr(nb_dev.status, 'value') else str(nb_dev.status)
+                            if current_status != "offline":
+                                nb_dev.status = "offline"
+                                nb_dev.save()
+                                logger.info(f"Marked stale device '{nb_dev.name}' as offline (not in UniFi)")
+                except Exception as e:
+                    logger.warning(f"Failed to clean up stale devices for site {site_display_name}: {e}")
         else:
             logger.error(f"Site {site_display_name} not found")
     except Exception as e:
@@ -2961,7 +2985,11 @@ if __name__ == "__main__":
     session.verify = _netbox_verify_ssl()
 
     logger.debug(f"Initializing NetBox API connection to: {netbox_url}")
-    nb = pynetbox.api(netbox_url, token=netbox_token, threading=True)
+    if netbox_token.startswith("nbt_"):
+        session.headers.update({"Authorization": f"Bearer {netbox_token}"})
+        nb = pynetbox.api(netbox_url, threading=True)
+    else:
+        nb = pynetbox.api(netbox_url, token=netbox_token, threading=True)
     nb.http_session = session  # Attach the custom session
     logger.debug("NetBox API connection established")
 
