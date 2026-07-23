@@ -1,6 +1,6 @@
 """Tests for cleanup utility functions."""
 import os
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from main import (
     _is_cleanup_enabled,
@@ -151,8 +151,123 @@ class TestRunNetboxCleanup:
                 all_unifi_serials_by_site={7: {"SER1"}},
             )
 
-        stale.assert_called_once_with("nb", site, "tenant", {"SER1"})
-        ifaces.assert_called_once_with("nb", site, "tenant")
+        stale.assert_called_once_with("nb", site, "tenant", {"SER1"}, "ubiq")
+        ifaces.assert_called_once_with("nb", site, "tenant", "ubiq")
         cables.assert_called_once_with("nb", site)
         ips.assert_called_once_with("nb", "tenant")
         dev_types.assert_called_once_with("nb", "ubiq")
+
+
+# ---------------------------------------------------------------------------
+#  Manufacturer scoping — cleanup must never touch non-UniFi devices
+# ---------------------------------------------------------------------------
+
+class TestCleanupStaleDevicesManufacturerFilter:
+    """cleanup_stale_devices must filter by manufacturer_id so that non-UniFi
+    devices are never deleted."""
+
+    def test_filter_includes_manufacturer_id(self):
+        import main
+
+        nb = MagicMock()
+        nb_site = type("S", (), {"id": 1, "name": "Site1"})()
+        tenant = type("T", (), {"id": 5})()
+        nb_ubiquiti = type("M", (), {"id": 42})()
+
+        main.cleanup_stale_devices(nb, nb_site, tenant, {"SER1"}, nb_ubiquiti)
+
+        nb.dcim.devices.filter.assert_called_once()
+        kwargs = nb.dcim.devices.filter.call_args.kwargs
+        assert kwargs.get("manufacturer_id") == 42
+
+    def test_filter_includes_site_and_tenant(self):
+        import main
+
+        nb = MagicMock()
+        nb_site = type("S", (), {"id": 7, "name": "Site7"})()
+        tenant = type("T", (), {"id": 3})()
+        nb_ubiquiti = type("M", (), {"id": 42})()
+
+        main.cleanup_stale_devices(nb, nb_site, tenant, set(), nb_ubiquiti)
+
+        kwargs = nb.dcim.devices.filter.call_args.kwargs
+        assert kwargs.get("site_id") == 7
+        assert kwargs.get("tenant_id") == 3
+
+
+class TestCleanupOrphanInterfacesManufacturerFilter:
+    """cleanup_orphan_interfaces must filter by manufacturer_id so that
+    interfaces on non-UniFi devices are never touched."""
+
+    def test_filter_includes_manufacturer_id(self):
+        import main
+
+        nb = MagicMock()
+        nb_site = type("S", (), {"id": 1, "name": "Site1"})()
+        tenant = type("T", (), {"id": 5})()
+        nb_ubiquiti = type("M", (), {"id": 99})()
+
+        main.cleanup_orphan_interfaces(nb, nb_site, tenant, nb_ubiquiti)
+
+        nb.dcim.devices.filter.assert_called_once()
+        kwargs = nb.dcim.devices.filter.call_args.kwargs
+        assert kwargs.get("manufacturer_id") == 99
+
+
+# ---------------------------------------------------------------------------
+#  Stale-marking controller-failure guard
+# ---------------------------------------------------------------------------
+
+class TestRunStaleMarkingControllerFailure:
+    """run_stale_marking must be skipped entirely when any controller failed,
+    to prevent marking live devices offline."""
+
+    def test_skips_when_controller_failed(self):
+        import main
+
+        with patch.object(main, "_controller_failed_urls", ["https://failed:8443"]):
+            nb = MagicMock()
+            main.run_stale_marking(nb, object(), object(), {})
+            nb.dcim.devices.filter.assert_not_called()
+
+    def test_runs_when_no_failures(self):
+        import main
+
+        nb = MagicMock()
+        nb.dcim.devices.filter.return_value = []
+        nb_site = type("S", (), {"id": 1, "name": "Site1"})()
+        tenant = type("T", (), {"id": 1})()
+        nb_ubiquiti = type("M", (), {"id": 42})()
+
+        with patch.object(main, "_controller_failed_urls", []), \
+             patch.object(main, "_all_unifi_serials_global", {"AAA"}), \
+             patch.object(main, "_cleanup_serials_by_site", {1: {"AAA"}}):
+            main.run_stale_marking(nb, tenant, nb_ubiquiti, {"s1": nb_site})
+            nb.dcim.devices.filter.assert_called_once()
+
+    def test_skips_when_no_serials_collected(self):
+        import main
+
+        nb = MagicMock()
+        nb_site = type("S", (), {"id": 1, "name": "Site1"})()
+
+        with patch.object(main, "_controller_failed_urls", []), \
+             patch.object(main, "_all_unifi_serials_global", set()):
+            main.run_stale_marking(nb, object(), object(), {"s1": nb_site})
+            nb.dcim.devices.filter.assert_not_called()
+
+    def test_filter_includes_manufacturer_id(self):
+        import main
+
+        nb = MagicMock()
+        nb.dcim.devices.filter.return_value = []
+        nb_site = type("S", (), {"id": 1, "name": "Site1"})()
+        tenant = type("T", (), {"id": 1})()
+        nb_ubiquiti = type("M", (), {"id": 77})()
+
+        with patch.object(main, "_controller_failed_urls", []), \
+             patch.object(main, "_all_unifi_serials_global", {"AAA"}), \
+             patch.object(main, "_cleanup_serials_by_site", {1: {"AAA"}}):
+            main.run_stale_marking(nb, tenant, nb_ubiquiti, {"s1": nb_site})
+            kwargs = nb.dcim.devices.filter.call_args.kwargs
+            assert kwargs.get("manufacturer_id") == 77
