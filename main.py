@@ -3084,6 +3084,23 @@ if __name__ == "__main__":
                                 unifi_api_key, unifi_api_key_header, nb, nb_ubiquiti,
                                 tenant, netbox_sites_dict, config)
 
+        # Abort the rest of the cycle if any controller failed and the user
+        # hasn't explicitly opted out of this safety check.
+        require_all = os.getenv("SYNC_REQUIRE_ALL_CONTROLLERS", "true").strip().lower() in ("true", "1", "yes")
+        with _controller_failed_lock:
+            failed = list(_controller_failed_urls)
+        if failed and require_all:
+            logger.error(
+                f"Aborting sync run #{run_count}: {len(failed)} controller(s) failed: {failed}. "
+                f"Set SYNC_REQUIRE_ALL_CONTROLLERS=false to allow partial syncs."
+            )
+            logger.info(f"=== Sync run #{run_count} aborted ===")
+            if sync_interval <= 0:
+                break
+            logger.info(f"Sleeping {sync_interval} seconds until next sync...")
+            _time.sleep(sync_interval)
+            continue
+
         # Mark stale devices AFTER all controllers finish (not per-site inside
         # process_site) to avoid race conditions between controllers that share
         # the same NetBox site.
