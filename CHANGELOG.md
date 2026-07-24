@@ -5,6 +5,7 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
+- New `NETBOX_API_DELAY_SECONDS` flag (default: `0.0`) injects a configurable delay before every NetBox API request to reduce server load. Implemented via a `ThrottledHTTPAdapter` mounted on the shared NetBox session, so it transparently covers all pynetbox calls (`get`/`filter`/`create`/`save`/`delete`) as well as the direct `available-ips` and OPTIONS schema lookups. Typical values: `0.2`–`1.0`.
 - New `NETBOX_USE_CUSTOM_FIELDS` flag (default: `true`) to completely disable creation, writing, and reading of the UniFi custom fields (`unifi_firmware`, `unifi_uptime`, `unifi_mac`, `unifi_last_seen`). Setting it to `false` avoids spurious device updates every sync cycle caused by volatile values (uptime counter, last-seen timestamp). When disabled, the `unifi_mac` custom field is also no longer used as a fallback lookup during cable sync.
 - GitHub Actions release pipeline updated for tag-driven GitHub Releases and PyPI trusted publishing via OIDC.
 - Gateway and DNS are now read from UniFi network config (`gateway_ip`, `dhcpd_dns_1-4`) for DHCP-to-static IP conversion.
