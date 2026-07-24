@@ -133,6 +133,7 @@ To avoid UniFi writeback entirely, disable DHCP conversion inputs:
 | `SYNC_WLANS` | `true` | Sync WLANs |
 | `SYNC_CABLES` | `true` | Sync uplink cables |
 | `SYNC_STALE_CLEANUP` | `true` | Mark missing devices offline |
+| `NETBOX_USE_CUSTOM_FIELDS` | `true` | Create and sync UniFi custom fields (`unifi_firmware`, `unifi_uptime`, `unifi_mac`, `unifi_last_seen`). Set to `false` to avoid spurious device updates every cycle — uptime and last-seen change on every UniFi poll, so leaving this on means devices are saved even when nothing meaningful changed. When disabled, the `unifi_mac` custom field is also no longer read as a fallback lookup during cable sync (the serial-based lookup still applies). |
 
 ## Preserve Manual Overrides
 
@@ -159,6 +160,11 @@ in NetBox and wants those edits to survive subsequent syncs.
 | `KEEP_EXISTING_STATUS` | `false` | Do not sync active/offline status from UniFi |
 | `KEEP_EXISTING_INTERFACES` | `false` | Do not sync physical/radio interfaces |
 | `KEEP_EXISTING_CUSTOM_FIELDS` | `false` | Do not sync firmware/uptime/MAC/last_seen custom fields |
+
+Note: `KEEP_EXISTING_CUSTOM_FIELDS` only skips *updating* the custom fields on
+existing devices. To disable custom fields entirely (no creation, no writing,
+no reading — including the `unifi_mac` fallback in cable sync), set
+`NETBOX_USE_CUSTOM_FIELDS=false` instead (see [Feature Toggles](#feature-toggles)).
 
 `site`, `tenant`, and `role` are **always** preserved on existing devices
 (they are only set when a device is first created); there are no flags for

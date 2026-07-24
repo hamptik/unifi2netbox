@@ -67,6 +67,20 @@ def _sync_interval_seconds() -> int:
     return _read_env_int("SYNC_INTERVAL", default=0, minimum=0)
 
 
+def load_use_custom_fields() -> bool:
+    """
+    Whether UniFi custom fields should be created and synced on NetBox devices.
+
+    When False, the sync neither creates nor reads nor writes the UniFi
+    custom fields (unifi_firmware, unifi_uptime, unifi_mac, unifi_last_seen).
+    This avoids spurious device updates on every sync cycle caused by
+    inherently volatile values (uptime counter, last-seen timestamp).
+
+    Defaults to True for backward compatibility.
+    """
+    return _parse_env_bool(os.getenv("NETBOX_USE_CUSTOM_FIELDS"), default=True)
+
+
 # ---------------------------------------------------------------------------
 #  Field-preservation settings (KEEP_EXISTING_*)
 # ---------------------------------------------------------------------------

@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 
 ### Added
-- Python packaging metadata added (`pyproject.toml`, `netbox_unifi_sync/version.py`, `netbox-plugin.yaml`) to support PyPI releases.
+- New `NETBOX_USE_CUSTOM_FIELDS` flag (default: `true`) to completely disable creation, writing, and reading of the UniFi custom fields (`unifi_firmware`, `unifi_uptime`, `unifi_mac`, `unifi_last_seen`). Setting it to `false` avoids spurious device updates every sync cycle caused by volatile values (uptime counter, last-seen timestamp). When disabled, the `unifi_mac` custom field is also no longer used as a fallback lookup during cable sync.
 - GitHub Actions release pipeline updated for tag-driven GitHub Releases and PyPI trusted publishing via OIDC.
 - Gateway and DNS are now read from UniFi network config (`gateway_ip`, `dhcpd_dns_1-4`) for DHCP-to-static IP conversion.
 - Fallback env vars `DEFAULT_GATEWAY` and `DEFAULT_DNS` when UniFi network config lacks gateway/DNS.
