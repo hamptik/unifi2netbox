@@ -11,6 +11,7 @@ import logging
 import pynetbox
 import ipaddress
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib3.exceptions import InsecureRequestWarning
 # Import the unifi module instead of defining the Unifi class
@@ -32,6 +33,7 @@ from sync.runtime_config import (
     _sync_interval_seconds,
     load_keep_existing_settings,
     load_name_conflict_policy,
+    load_nb_api_delay_seconds,
     load_runtime_config,
     load_use_custom_fields,
 )
@@ -123,9 +125,32 @@ _MAC_WITH_SEP_RE = re.compile(r"(?i)([0-9a-f]{2}[:-]){5}[0-9a-f]{2}$")
 _MAC_PLAIN_RE = re.compile(r"(?i)[0-9a-f]{12}$")
 _NON_HEX_RE = re.compile(r"[^0-9A-Fa-f]")
 
-def get_postable_fields(base_url, token, url_path):
+
+class ThrottledHTTPAdapter(requests.adapters.HTTPAdapter):
+    """HTTPAdapter that sleeps a fixed delay before every request.
+
+    Mounted on the NetBox session to spread out API calls and reduce load.
+    A no-op (delay == 0.0) preserves the default behavior. Thread-safe:
+    each worker thread independently sleeps before its own request.
+    """
+
+    def __init__(self, delay: float = 0.0, *args, **kwargs):
+        self._delay = max(0.0, float(delay))
+        super().__init__(*args, **kwargs)
+
+    def send(self, request, **kwargs):
+        if self._delay:
+            time.sleep(self._delay)
+        return super().send(request, **kwargs)
+
+
+def get_postable_fields(base_url, token, url_path, session=None):
     """
     Retrieves the POST-able fields for NetBox path.
+
+    An optional ``session`` may be supplied to reuse a shared (and possibly
+    throttled) requests Session; when omitted a bare ``requests.options``
+    call is made (backward compatible).
     """
     normalized_base = base_url.rstrip("/")
     normalized_path = url_path.strip("/")
@@ -142,7 +167,8 @@ def get_postable_fields(base_url, token, url_path):
         "Authorization": f"Token {token}",
         "Content-Type": "application/json",
     }
-    response = requests.options(
+    requester = session.options if session is not None else requests.options
+    response = requester(
         url,
         headers=headers,
         verify=_netbox_verify_ssl(),
@@ -2146,7 +2172,10 @@ def process_device(unifi, nb, site, device, nb_ubiquiti, tenant, unifi_device_ip
                     device_data['asset_tag'] = asset_tag
 
                 logger.debug("Getting postable fields for NetBox API")
-                available_fields = get_postable_fields(netbox_url, netbox_token, 'dcim/devices')
+                available_fields = get_postable_fields(
+                    netbox_url, netbox_token, 'dcim/devices',
+                    session=getattr(nb, "http_session", None),
+                )
                 logger.debug(f"Available NetBox API fields: {list(available_fields.keys())}")
                 if 'role' in available_fields:
                     logger.debug(f"Using 'role' field for device role (ID: {nb_device_role.id})")
@@ -2990,9 +3019,18 @@ if __name__ == "__main__":
         logger.error("Netbox token is missing from environment variables.")
         raise SystemExit(1)
 
-    # Create a custom HTTP session as this script will often exceed the default pool size of 10
+    # Create a custom HTTP session as this script will often exceed the default pool size of 10.
+    # The ThrottledHTTPAdapter injects NB_API_DELAY_SECONDS before every request to reduce
+    # NetBox load (no-op when the delay is 0.0).
+    nb_api_delay = load_nb_api_delay_seconds()
     session = requests.Session()
-    adapter = requests.adapters.HTTPAdapter(pool_connections=50, pool_maxsize=50)
+    adapter = ThrottledHTTPAdapter(
+        delay=nb_api_delay,
+        pool_connections=50,
+        pool_maxsize=50,
+    )
+    if nb_api_delay:
+        logger.info(f"NetBox API throttling enabled: {nb_api_delay}s delay between requests.")
 
     # Adjust connection pool size
     session.mount("http://", adapter)

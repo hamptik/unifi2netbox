@@ -286,8 +286,12 @@ def find_available_static_ip(
         url = f"{netbox_url}/api/ipam/prefixes/{prefix_id}/available-ips/"
         headers = {"Authorization": f"Token {netbox_token}", "Accept": "application/json"}
 
+        # Reuse the (possibly throttled) NetBox session when available so this
+        # direct call respects NB_API_DELAY_SECONDS too.
+        session = getattr(nb, "http_session", None)
+        requester = session.get if session is not None else requests.get
         try:
-            resp = requests.get(
+            resp = requester(
                 url,
                 headers=headers,
                 params={"limit": max_attempts * 5},

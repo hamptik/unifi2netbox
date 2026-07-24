@@ -55,6 +55,26 @@ def _read_env_int(var_name: str, default: int, minimum: int | None = None) -> in
     return value
 
 
+def _read_env_float(var_name: str, default: float, minimum: float = 0.0) -> float:
+    """Parse a float env var, falling back to default on invalid/negative input."""
+    raw_value = os.getenv(var_name)
+    if raw_value is None or str(raw_value).strip() == "":
+        return default
+    try:
+        value = float(str(raw_value).strip())
+    except (TypeError, ValueError):
+        logger.warning(
+            f"Invalid float value for {var_name}: {raw_value}. Using default {default}."
+        )
+        return default
+    if value < minimum:
+        logger.warning(
+            f"Value for {var_name} must be >= {minimum}. Using default {default}."
+        )
+        return default
+    return value
+
+
 def _unifi_verify_ssl() -> bool:
     return _parse_env_bool(os.getenv("UNIFI_VERIFY_SSL"), default=True)
 
@@ -65,6 +85,16 @@ def _netbox_verify_ssl() -> bool:
 
 def _sync_interval_seconds() -> int:
     return _read_env_int("SYNC_INTERVAL", default=0, minimum=0)
+
+
+def load_nb_api_delay_seconds() -> float:
+    """
+    Delay (in seconds) injected before every NetBox API request to reduce load.
+
+    0.0 (default) disables throttling for backward compatibility. Typical
+    values are 0.2–1.0. Enforced minimum is 0.0 (negative values are rejected).
+    """
+    return _read_env_float("NB_API_DELAY_SECONDS", default=0.0, minimum=0.0)
 
 
 def load_use_custom_fields() -> bool:
