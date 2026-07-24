@@ -1,4 +1,4 @@
-"""Tests for NB_API_DELAY_SECONDS throttling."""
+"""Tests for NETBOX_API_DELAY_SECONDS throttling."""
 import os
 import time
 from unittest.mock import patch
@@ -18,19 +18,19 @@ class TestLoadNbApiDelaySeconds:
             assert load_nb_api_delay_seconds() == 0.0
 
     def test_parses_float(self):
-        with patch.dict(os.environ, {"NB_API_DELAY_SECONDS": "0.2"}, clear=True):
+        with patch.dict(os.environ, {"NETBOX_API_DELAY_SECONDS": "0.2"}, clear=True):
             assert load_nb_api_delay_seconds() == 0.2
 
     def test_parses_one(self):
-        with patch.dict(os.environ, {"NB_API_DELAY_SECONDS": "1"}, clear=True):
+        with patch.dict(os.environ, {"NETBOX_API_DELAY_SECONDS": "1"}, clear=True):
             assert load_nb_api_delay_seconds() == 1.0
 
     def test_invalid_falls_back_to_default(self):
-        with patch.dict(os.environ, {"NB_API_DELAY_SECONDS": "abc"}, clear=True):
+        with patch.dict(os.environ, {"NETBOX_API_DELAY_SECONDS": "abc"}, clear=True):
             assert load_nb_api_delay_seconds() == 0.0
 
     def test_negative_rejected(self):
-        with patch.dict(os.environ, {"NB_API_DELAY_SECONDS": "-0.5"}, clear=True):
+        with patch.dict(os.environ, {"NETBOX_API_DELAY_SECONDS": "-0.5"}, clear=True):
             assert load_nb_api_delay_seconds() == 0.0
 
 

@@ -287,7 +287,7 @@ def find_available_static_ip(
         headers = {"Authorization": f"Token {netbox_token}", "Accept": "application/json"}
 
         # Reuse the (possibly throttled) NetBox session when available so this
-        # direct call respects NB_API_DELAY_SECONDS too.
+        # direct call respects NETBOX_API_DELAY_SECONDS too.
         session = getattr(nb, "http_session", None)
         requester = session.get if session is not None else requests.get
         try:

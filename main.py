@@ -3020,7 +3020,7 @@ if __name__ == "__main__":
         raise SystemExit(1)
 
     # Create a custom HTTP session as this script will often exceed the default pool size of 10.
-    # The ThrottledHTTPAdapter injects NB_API_DELAY_SECONDS before every request to reduce
+    # The ThrottledHTTPAdapter injects NETBOX_API_DELAY_SECONDS before every request to reduce
     # NetBox load (no-op when the delay is 0.0).
     nb_api_delay = load_nb_api_delay_seconds()
     session = requests.Session()

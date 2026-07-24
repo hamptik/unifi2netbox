@@ -94,7 +94,7 @@ def load_nb_api_delay_seconds() -> float:
     0.0 (default) disables throttling for backward compatibility. Typical
     values are 0.2–1.0. Enforced minimum is 0.0 (negative values are rejected).
     """
-    return _read_env_float("NB_API_DELAY_SECONDS", default=0.0, minimum=0.0)
+    return _read_env_float("NETBOX_API_DELAY_SECONDS", default=0.0, minimum=0.0)
 
 
 def load_use_custom_fields() -> bool:

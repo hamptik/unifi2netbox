@@ -221,7 +221,7 @@ A tag takes precedence over the global `KEEP_EXISTING_*` flags.
 
 | Variable | Default in code | Description |
 |---|---|---|
-| `NB_API_DELAY_SECONDS` | `0.0` | Seconds to wait before every NetBox API request. `0.0` disables throttling (default). Typical values: `0.2`–`1.0` to reduce load on the NetBox server. Applied via a custom HTTP adapter mounted on the shared NetBox session, so it covers all pynetbox calls (`get`/`filter`/`create`/`save`/`delete`) as well as the direct `available-ips` and OPTIONS schema lookups. |
+| `NETBOX_API_DELAY_SECONDS` | `0.0` | Seconds to wait before every NetBox API request. `0.0` disables throttling (default). Typical values: `0.2`–`1.0` to reduce load on the NetBox server. Applied via a custom HTTP adapter mounted on the shared NetBox session, so it covers all pynetbox calls (`get`/`filter`/`create`/`save`/`delete`) as well as the direct `available-ips` and OPTIONS schema lookups. |
 
 ## Cleanup
 
