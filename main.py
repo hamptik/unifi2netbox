@@ -33,6 +33,7 @@ from sync.runtime_config import (
     load_keep_existing_settings,
     load_name_conflict_policy,
     load_runtime_config,
+    load_use_custom_fields,
 )
 from sync.runtime_config import _unifi_verify_ssl  # noqa: F401
 from sync.log_sanitizer import SensitiveDataFormatter
@@ -55,6 +56,13 @@ MAX_DEVICE_THREADS = _read_env_int("MAX_DEVICE_THREADS", default=8, minimum=1)
 # Field-preservation flags loaded once from KEEP_EXISTING_* env vars.
 # See has_keep_tag() / should_preserve_field() for usage.
 KEEP_EXISTING_SETTINGS = load_keep_existing_settings()
+
+# Whether UniFi custom fields (unifi_firmware, unifi_uptime, unifi_mac,
+# unifi_last_seen) are created and synced at all. When False, no custom
+# fields are created, written, or read (e.g. during cable-sync MAC lookup).
+# Set NETBOX_USE_CUSTOM_FIELDS=false to avoid spurious device updates every
+# cycle caused by volatile values (uptime counter, last-seen timestamp).
+USE_CUSTOM_FIELDS = load_use_custom_fields()
 
 # Optional comma-separated list of tag names attached to every synced device.
 # Empty by default — no implicit tag is added. Previous versions hardcoded
@@ -549,6 +557,12 @@ def sync_device_state(nb, nb_device, device):
 
 def sync_device_custom_fields(nb, nb_device, device):
     """Sync firmware version, uptime, MAC, and last seen from UniFi to NetBox custom fields."""
+    # Global kill-switch: when NETBOX_USE_CUSTOM_FIELDS=false, skip creation,
+    # reads, and writes of the UniFi custom fields entirely. This prevents
+    # volatile values (uptime counter, last-seen timestamp) from triggering
+    # a device .save() on every sync cycle even when nothing else changed.
+    if not USE_CUSTOM_FIELDS:
+        return
     # Ensure custom fields exist
     ensure_custom_field(nb, "unifi_firmware", cf_type="text", label="UniFi Firmware")
     ensure_custom_field(nb, "unifi_uptime", cf_type="integer", label="UniFi Uptime (sec)")
@@ -2523,10 +2537,11 @@ def process_site(unifi, nb, site_obj, site_display_name, nb_site, nb_ubiquiti, t
                         if serial:
                             all_nb_devices_by_mac[serial] = d
                         # Also index by custom field MAC if available
-                        cf = dict(d.custom_fields or {})
-                        cf_mac = (cf.get("unifi_mac") or "").upper().replace(":", "")
-                        if cf_mac:
-                            all_nb_devices_by_mac[cf_mac] = d
+                        if USE_CUSTOM_FIELDS:
+                            cf = dict(d.custom_fields or {})
+                            cf_mac = (cf.get("unifi_mac") or "").upper().replace(":", "")
+                            if cf_mac:
+                                all_nb_devices_by_mac[cf_mac] = d
                     # Index UniFi device UUIDs for O(1) upstream lookup
                     for unifi_dev in devices:
                         dev_id = unifi_dev.get("id")
